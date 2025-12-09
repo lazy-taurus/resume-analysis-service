@@ -25,7 +25,6 @@ GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
 else:
-    print("⚠️ CRITICAL WARNING: GEMINI_API_KEY is missing from .env file.")
     client = None
 
 # --- 3. Define Output Schema ---
@@ -78,26 +77,19 @@ def analyze_resume(resume_text: str, job_description: str) -> dict:
     last_error = None
     for model_to_try in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
         try:
-            # print(f"DEBUG: Analyzing with {model_to_try}...") 
             response = _call_model(model_to_try)
-            
             # Extract text carefully
-            text = response.text
-            
+            text = getattr(response, "text", None) or str(response)
             # Parse JSON
             return json.loads(text)
-
         except Exception as e:
             last_error = e
             error_msg = str(e)
-            print(f"⚠️ Error with {model_to_try}: {error_msg}")
-            
             # If it's a 404 (Model not found) or 429 (Quota), try the next model
-            if "404" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                 time.sleep(1)
-                 continue
+            if "404" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
+                time.sleep(1)
+                continue
             else:
-                # If it's a weird error, break and fail
                 break
 
     return {
