@@ -2,65 +2,105 @@ from google import genai
 from google.genai import types
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 from pydantic import BaseModel, Field
 import json
+import time
 
-# Load environment variables from the .env file
-load_dotenv()
+# --- 1. Load Environment Variables Safely ---
+# Locate the .env file in the same directory as this script
+env_path = Path(__file__).parent / '.env'
 
-# Initialize the Gemini Client
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+# FORCE override system variables with the .env file
+# This is crucial to stop the "API Key Expired" loop
+load_dotenv(dotenv_path=env_path, override=True)
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Use the models we verified work
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash") 
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+
+# --- 2. Initialize Client ---
+if GEMINI_API_KEY:
+    client = genai.Client(api_key=GEMINI_API_KEY)
+else:
+    print("⚠️ CRITICAL WARNING: GEMINI_API_KEY is missing from .env file.")
+    client = None
+
+# --- 3. Define Output Schema ---
 class ResumeAnalysis(BaseModel):
     """Schema for the structured analysis result using Pydantic."""
     name: str = Field(description="The full name of the candidate found in the resume.")
     core_skills_summary: str = Field(description="A 3-sentence summary of the candidate's core technical skills relevant to the job.")
-    match_score_percent: int = Field(description="An estimated match percentage (0-100) for the candidate against the provided Job Description, focusing on AI/ML/Python skills.")
+    match_score_percent: int = Field(description="An estimated match percentage (0-100) for the candidate against the provided Job Description.")
     missing_skills: list[str] = Field(description="A list of 3 specific technical skills mentioned in the job description that are NOT found in the resume.")
-    recommended_improvements: list[str] = Field(description="A list of 3 specific, actionable suggestions for improving the resume for this job, based on the missing skills.")
+    recommended_improvements: list[str] = Field(description="A list of 3 specific, actionable suggestions for improving the resume for this job.")
 
 
+# --- 4. Main Analysis Function ---
 def analyze_resume(resume_text: str, job_description: str) -> dict:
     """Sends the resume and job description to the Gemini LLM for structured analysis."""
+    
+    if not client:
+        return {
+            "error": "Configuration Error", 
+            "details": "API Key missing. Please check your .env file."
+        }
 
-    # 1. System Instruction: Guiding the LLM's role and behavior
-    system_instruction = f"""
-    You are an expert Backend Developer Intern Resume Analyzer AI, specialized in IBM job descriptions. 
-    Your task is to analyze the provided resume text and score it against the provided Job Description. 
-    You MUST strictly adhere to the exact JSON output schema provided in the configuration. 
-    Be critical but fair, paying special attention to Python, AI/ML, and API experience.
+    system_instruction = """
+    You are an expert Resume Analyzer AI. 
+    Analyze the candidate's resume against the job description.
+    You MUST output valid JSON matching the schema provided.
     """
 
-    # 2. User Prompt: Combining the inputs the LLM needs to process
     user_prompt = f"""
-    --- CANDIDATE RESUME TEXT ---
+    --- CANDIDATE RESUME ---
     {resume_text}
 
-    --- TARGET JOB DESCRIPTION ---
+    --- JOB DESCRIPTION ---
     {job_description}
     """
 
-    try:
-        # 3. Configuration: Ensuring the output is structured JSON matching the Pydantic model
+    def _call_model(model_name: str):
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=ResumeAnalysis, # Uses the Pydantic class to enforce schema
-            system_instruction=system_instruction
+            response_schema=ResumeAnalysis,
+            system_instruction=system_instruction,
         )
-
-        # 4. Call the Gemini API
-        response = client.models.generate_content(
-            model='gemini-2.5-pro',
+        return client.models.generate_content(
+            model=model_name,
             contents=[user_prompt],
             config=config,
         )
 
-        # 5. Return the JSON result
-        # The SDK response structure may vary; assume textual JSON is available on `response.text`.
-        return json.loads(response.text)
+    # Try primary model, then fallback
+    last_error = None
+    for model_to_try in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
+        try:
+            # print(f"DEBUG: Analyzing with {model_to_try}...") 
+            response = _call_model(model_to_try)
+            
+            # Extract text carefully
+            text = response.text
+            
+            # Parse JSON
+            return json.loads(text)
 
-    except Exception as e:
-        # Handle API errors gracefully
-        print(f"Gemini API Error: {e}")
-        return {"error": "Failed to get response from Gemini.", "details": str(e)}
+        except Exception as e:
+            last_error = e
+            error_msg = str(e)
+            print(f"⚠️ Error with {model_to_try}: {error_msg}")
+            
+            # If it's a 404 (Model not found) or 429 (Quota), try the next model
+            if "404" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                 time.sleep(1)
+                 continue
+            else:
+                # If it's a weird error, break and fail
+                break
+
+    return {
+        "error": "Analysis Failed", 
+        "details": f"All models failed. Last error: {str(last_error)}"
+    }

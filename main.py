@@ -5,15 +5,13 @@ from llm_analyzer import analyze_resume, ResumeAnalysis
 # Initialize the FastAPI application
 app = FastAPI(
     title="IBM Internship Resume Analyzer API",
-    description="A Python backend service using Gemini 2.5 Pro for structured resume analysis."
+    description="A Python backend service using Gemini for structured resume analysis."
 )
-
 
 class AnalysisRequest(BaseModel):
     """Input schema for the /analyze endpoint."""
     resume_text: str = Field(..., example="Vardan Rastogi\n... Java, Python...\nProject: Foodly...")
     job_description: str = Field(..., example="Backend Developer Intern\n... Knowledge of AI & ML...\nExposure in Python...")
-
 
 @app.post(
     "/analyze",
@@ -31,9 +29,15 @@ def run_analysis(request_data: AnalysisRequest):
     # Call the core LLM function from llm_analyzer.py
     result = analyze_resume(request_data.resume_text, request_data.job_description)
 
+    # CHECK FOR ERRORS BEFORE RETURNING
+    # If we return the dict directly, Pydantic tries to validate it against ResumeAnalysis immediately.
+    # We need to catch the error dict first.
     if "error" in result:
-        # If the LLM call failed, raise an HTTP error
-        raise HTTPException(status_code=500, detail=result.get("details", "Unknown error from Gemini."))
+        # Raise the specific error from the analyzer
+        raise HTTPException(
+            status_code=500, 
+            detail=result.get("details", result.get("error", "Unknown error from Gemini."))
+        )
 
-    # Return the structured JSON result
+    # If no error, return the valid result
     return result
