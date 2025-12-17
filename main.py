@@ -9,9 +9,16 @@ from llm_analyzer import analyze_resume, ResumeAnalysis
 from db_utils import connect_to_mongo, close_mongo_connection, get_database
 
 # Initialize the FastAPI application
+# main.py
+
 app = FastAPI(
-    title="IBM Internship Resume Analyzer API",
-    description="A Python backend service using Gemini for structured resume analysis."
+    title="RESUME ANALYZER", # Change the main heading here
+    description="This is a professional Python backend service that uses Gemini 2.5 Pro to execute an automated analysis pipeline for resumes.", # Change the sub-text here
+    version="1.0.0",
+    contact={
+        "name": "Vardan Rastogi",
+        "url": "https://github.com/yourusername",
+    }
 )
 
 # Database collection name from env

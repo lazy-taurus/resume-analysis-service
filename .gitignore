@@ -1,4 +1,18 @@
-venv/
-__pycache__/
+# Environments
 .env
-*.pyc
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Project Specific
+*.log
